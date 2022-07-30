@@ -168,7 +168,7 @@ xcopy /y $(TargetPath) bin</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\luaTextLoop.c" />
-    <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="..\dllmain.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\src\common.h" />

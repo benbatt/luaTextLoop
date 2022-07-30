@@ -15,10 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dllmain.cpp">
+    <ClCompile Include="..\..\..\src\luaTextLoop.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\src\luaTextLoop.c">
+    <ClCompile Include="..\dllmain.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
