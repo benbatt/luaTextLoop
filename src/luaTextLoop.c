@@ -20,6 +20,80 @@ DEALINGS IN THE SOFTWARE.
 
 #include "common.h"
 #include <conio.h>
+#include <stdlib.h>
+
+static HANDLE StandardOutput = INVALID_HANDLE_VALUE;
+static HANDLE ScreenBuffer = INVALID_HANDLE_VALUE;
+
+static COORD ScreenBufferSize = { 0 };
+static CHAR_INFO *CopyBuffer = NULL;
+
+static int OverlayBottom = 0;
+
+static void initializeConsole(lua_State *L)
+{
+    StandardOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    if (StandardOutput == INVALID_HANDLE_VALUE)
+    {
+        luaL_error(L, "Couldn't get the standard output handle");
+        return;
+    }
+
+    ScreenBuffer = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CONSOLE_TEXTMODE_BUFFER, NULL);
+
+    if (ScreenBuffer == INVALID_HANDLE_VALUE)
+    {
+        luaL_error(L, "Couldn't get the standard output handle");
+        return;
+    }
+
+    /* Hide the cursor */
+    CONSOLE_CURSOR_INFO cursorInfo = { 100, FALSE };
+    SetConsoleCursorInfo(ScreenBuffer, &cursorInfo);
+
+    /* Allocate the copy buffer */
+    CONSOLE_SCREEN_BUFFER_INFO screenBufferInfo;
+    GetConsoleScreenBufferInfo(ScreenBuffer, &screenBufferInfo);
+
+    ScreenBufferSize = screenBufferInfo.dwSize;
+    CopyBuffer = malloc(sizeof(*CopyBuffer) * ScreenBufferSize.X * ScreenBufferSize.Y);
+}
+
+static void copyStandardOutput()
+{
+    int remainingHeight = ScreenBufferSize.Y - 1 - OverlayBottom;
+
+    if (remainingHeight > 0)
+    {
+        CONSOLE_SCREEN_BUFFER_INFO standardOutputInfo;
+        GetConsoleScreenBufferInfo(StandardOutput, &standardOutputInfo);
+
+        const COORD *cursor = &standardOutputInfo.dwCursorPosition;
+        const SMALL_RECT *outputWindow = &standardOutputInfo.srWindow;
+
+        COORD bufferPosition = { 0, 0 };
+        SMALL_RECT readRect = {
+            outputWindow->Left,
+            max(0, cursor->Y - remainingHeight),
+            outputWindow->Right,
+            cursor->Y
+        };
+
+        ReadConsoleOutputA(StandardOutput, CopyBuffer, ScreenBufferSize, bufferPosition, &readRect);
+
+        int readHeight = readRect.Bottom - readRect.Top;
+
+        SMALL_RECT writeRect;
+        writeRect.Left = 0;
+        writeRect.Top = OverlayBottom + 1;
+        writeRect.Right = ScreenBufferSize.X - 1;
+        writeRect.Bottom = writeRect.Top + readHeight;
+
+        WriteConsoleOutputA(ScreenBuffer, CopyBuffer, ScreenBufferSize, bufferPosition, &writeRect);
+    }
+}
 
 static int asciiKeyCode(int code)
 {
@@ -59,12 +133,71 @@ static void getKeyPresses(lua_State *L)
     }
 }
 
+static int setOverlay(lua_State *L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    size_t lineCount = lua_objlen(L, 1);
+
+    SMALL_RECT writeRect = { 0, 0, 0, lineCount - 1 };
+
+    lua_getfield(L, 1, "x");
+    writeRect.Left = lua_tointeger(L, -1);
+
+    lineCount = min(lineCount, ScreenBufferSize.Y);
+
+    size_t maxLength = 0;
+
+    for (int y = 0; y < lineCount; ++y)
+    {
+        lua_pushinteger(L, y + 1);
+        lua_gettable(L, 1);
+
+        size_t length = 0;
+        const char *line = lua_tolstring(L, -1, &length);
+
+        maxLength = max(maxLength, length);
+
+        length = min(length, ScreenBufferSize.X);
+
+        for (int x = 0; x < length; ++x)
+        {
+            CHAR_INFO *charInfo = &CopyBuffer[x + (y * ScreenBufferSize.X)];
+
+            charInfo->Char.AsciiChar = line[x];
+            charInfo->Attributes = 0x07; /* White */
+        }
+
+        for (int x = length; x < ScreenBufferSize.X; ++x)
+        {
+            CHAR_INFO *charInfo = &CopyBuffer[x + (y * ScreenBufferSize.X)];
+
+            charInfo->Char.AsciiChar = ' ';
+            charInfo->Attributes = 0x07; /* White */
+        }
+    }
+
+    writeRect.Right = writeRect.Left + maxLength - 1;
+
+    COORD bufferPosition = { 0, 0 };
+
+    WriteConsoleOutputA(ScreenBuffer, CopyBuffer, ScreenBufferSize, bufferPosition, &writeRect);
+
+    OverlayBottom = writeRect.Bottom;
+
+    copyStandardOutput();
+
+    return 0;
+}
+
 static int start(lua_State *L)
 {
     const int sleepTime = luaL_checkint(L, 1);
 
     const int callbackIndex = 2;
     luaL_checktype(L, callbackIndex, LUA_TFUNCTION);
+
+    SetConsoleActiveScreenBuffer(ScreenBuffer);
 
     while (1)
     {
@@ -74,6 +207,8 @@ static int start(lua_State *L)
 
         lua_call(L, 1, 1);
 
+        copyStandardOutput();
+
         if (!lua_toboolean(L, -1))
         {
             break;
@@ -82,10 +217,13 @@ static int start(lua_State *L)
         Sleep(sleepTime);
     }
 
+    SetConsoleActiveScreenBuffer(StandardOutput);
+
     return 0;
 }
 
 luaL_Reg StaticFunctions[] = {
+    { "setOverlay", setOverlay },
     { "start", start },
     { NULL, NULL }
 };
@@ -95,6 +233,8 @@ static void createKeyNamesTable(lua_State *L);
 
 extern int LUATEXTLOOP_EXPORT luaopen_luaTextLoop(lua_State *L)
 {
+    initializeConsole(L);
+
     luaL_register(L, "TextLoop", StaticFunctions);
 
     createKeyCodesTable(L);
