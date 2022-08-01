@@ -255,6 +255,7 @@ typedef struct KeyCodeEntry {
 
 KeyCodeEntry KeyCodeEntries[] = {
     /* ASCII codes */
+    { 8, "Backspace" },
     { 9, "Tab" },
     { 13, "Return" },
     { 27, "Escape" },
