@@ -199,15 +199,22 @@ static int start(lua_State *L)
 
     SetConsoleActiveScreenBuffer(ScreenBuffer);
 
+    int lastCallResult = 0;
+
     while (1)
     {
         lua_pushvalue(L, callbackIndex);
 
         getKeyPresses(L);
 
-        lua_call(L, 1, 1);
+        lastCallResult = lua_pcall(L, 1, 1, 0);
 
         copyStandardOutput();
+
+        if (lastCallResult != 0)
+        {
+            break;
+        }
 
         if (!lua_toboolean(L, -1))
         {
@@ -218,6 +225,11 @@ static int start(lua_State *L)
     }
 
     SetConsoleActiveScreenBuffer(StandardOutput);
+
+    if (lastCallResult != 0)
+    {
+        return lua_error(L);
+    }
 
     return 0;
 }
